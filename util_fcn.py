@@ -16,6 +16,7 @@ from scipy import ndimage
 from sklearn.utils import shuffle
 import fnmatch
 from onedrive_data import *
+import pandas as pd 
 
 class DefineParameters:
     def __init__(self, batch_train=0, epochs=1, batch_test=1, axis_select=0, num_subject=None , mri_type = 3):
@@ -54,14 +55,15 @@ class DefineParameters:
                         
         """dividir en train y test"""
         self.train_file, self.test_file=train_test_split(self.files, test_size=0.5, random_state=42)
+        
+        """"Dataset con sujetos y sus respectivas etiquetas"""
+        self.df = pd.read_csv("subjects.csv",usecols=(0,1),header=None)
     
-        self.axial_coords = ['right', 'forward', 'up', 'pitch', 'roll', 'yaw']
         self.batch_train = batch_train
         self.steps_per_epoch = int(np.ceil(len(self.train_file)/self.batch_train))
         self.epochs = epochs
         self.batch_test = batch_test
         self.steps = int(np.ceil(len(self.test_file) / self.batch_test))
-        self.label = self.axial_coords[axis_select]
         self.axis_select = axis_select
         self.VOL_SIZE_WIDTH = 128
         self.VOL_SIZE_HEIGHT = 128
@@ -76,25 +78,26 @@ class DefineParameters:
         self.CNN_loss = "mean_squared_error"
         self.CNN_learn_rate = 0.001
         self.CNN_optimizer = optimizers.Adam(learning_rate=0.001)
-        self.CNN_metrics = ['mean_absolute_error', 'mean_absolute_percentage_error']
+        self.CNN_metrics = ['mean_absolute_error', 'mean_absolute_percentage_error', "accuracy"]
         
-    def get_data(self):
-        print("train_file len",len(self.train_file))
-        for i in self.files:
-            print(i)
-
-    
-def just_one_ses(self, train = True, labels = False):   
+def train_data_labels_NaiveCPH(df, file):
+    targets = []
+    for j in range(int(np.ceil(900/1.51069))):
+        targets.append(int(df[1][df[0]==file[94:101]]))                 
+    return targets
+            
+def just_one_ses(self):   
     j=0
-    #file = "C:/Users/damia/Downloads/sub-001_ses-01_task-dist_bold.nii"
-    #files = ["C:/Users/damia/OneDrive - Instituto Tecnologico y de Estudios Superiores de Monterrey/rawdata/sub-003/ses-01/func/sub-003_ses-01_task-dist_bold.nii",
-    #         "C:/Users/damia/OneDrive - Instituto Tecnologico y de Estudios Superiores de Monterrey/rawdata/sub-003/ses-02/func/sub-003_ses-02_task-dist_bold.nii"]
-    for i in range(int(np.ceil((len(self.files)/self.batch_train)*self.epochs))):
+    
+    """"Dataset con sujetos y sus respectivas etiquetas"""
+    df = pd.read_csv("subjects.csv",usecols=(0,1),header=None)
+    
+    for i in range(int(np.ceil((len(self.train_file)/self.batch_train)*self.epochs))):
         if j * self.batch_train >= len(self.train_file):# This loop is used to run the generator indefinitely.
             j = 0
-            random.shuffle(self.files)
+            random.shuffle(self.train_file)
         else:
-            file_chunk = self.files[i * self.batch_train : (i + 1) * self.batch_train]
+            file_chunk = self.train_file[i * self.batch_train : (i + 1) * self.batch_train]
             inputs = []
             targets = []
             for file in file_chunk:
@@ -103,7 +106,7 @@ def just_one_ses(self, train = True, labels = False):
             
                 inputs.extend(func_images_aug(data,augmentation=True))
                 #targets.extend(labels_func()) #Jusf for dist data
-                targets.extend(labels_Naive_CPH(file))
+                targets.extend(train_data_labels_NaiveCPH(df,file))
             
                 """
                 #agregamos imagenes augmentadas de distención 
@@ -111,7 +114,6 @@ def just_one_ses(self, train = True, labels = False):
                 inputs.extend(dist_img)
                 targets.extend(dist_labels)
                 """
-
             inputs, targets = shuffle(inputs, targets)    
             inputs = np.asarray(inputs)
             targets = np.asarray(targets)
@@ -125,15 +127,10 @@ def just_one_ses(self, train = True, labels = False):
             # Convert the dataset to a generator and subsequently to numpy array
             data_ds = tfds.as_numpy(data_ds)  # This is where tensorflow-datasets library is used.
             inputs = np.asarray([data for data in data_ds]).reshape(first_dim, self.VOL_SIZE_WIDTH,
-                                                                    self.VOL_SIZE_HEIGHT, self.VOL_SIZE_DEEP)
-            
-            train_x, test_x, train_y, test_y = train_test_split(inputs, targets, test_size=0.3, random_state=42)
+                                                                    self.VOL_SIZE_HEIGHT, self.VOL_SIZE_DEEP)           
             j=j+1
-            if train:
-                yield train_x, train_y
-            
-            else:
-                yield test_x, test_y
+
+            yield inputs, targets
                 
 
 """data generator para func"""
@@ -153,7 +150,7 @@ def train_data_generator_func(self):
                 data = temp.get_fdata()
                 
                 inputs.extend(func_images_aug(data,augmentation=False))
-                targets.extend(labels_func())
+                targets.extend(data_labels_NaiveCPH())
                 
                 """
                 #agregamos imagenes augmentadas de distención 
@@ -178,54 +175,6 @@ def train_data_generator_func(self):
             # return inputs, targets
             j = j + 1
 
-
-"""
-#data generator para func
-def train_data_generator_func(self):
-    j = 0
-    while True:
-        if j * self.batch_train >= len(self.train_file):  # This loop is used to run the generator indefinitely.
-            j = 0
-            random.shuffle(self.train_file)
-        else:
-            file_chunk = self.train_file[j * self.batch_train : (j + 1) * self.batch_train]
-
-            inputs = []
-            targets = []
-            for file in file_chunk:
-                temp = nib.load(file)
-                data = temp.get_fdata()
-                
-                inputs.extend(func_images_aug(data,augmentation=True))
-                targets.extend(labels_func())
-                
-                
-                #agregamos imagenes augmentadas de distención 
-                #dist_img, dist_labels = just_dist(inputs)
-                #inputs.extend(dist_img)
-                #targets.extend(dist_labels)
-                
-
-            inputs, targets = shuffle(inputs, targets)    
-            inputs = np.asarray(inputs)
-            targets = np.asarray(targets)
-            first_dim = inputs.shape[0]
-            # Create tensorflow dataset so that we can use `map` function that can do parallel computation.
-            data_ds = tf.data.Dataset.from_tensor_slices(inputs)
-            data_ds = data_ds.batch(batch_size=first_dim).map(normalize,
-                                                              num_parallel_calls=tf.data.experimental.AUTOTUNE)
-            # Convert the dataset to a generator and subsequently to numpy array
-            data_ds = tfds.as_numpy(data_ds)  # This is where tensorflow-datasets library is used.
-            inputs = np.asarray([data for data in data_ds]).reshape(first_dim, self.VOL_SIZE_WIDTH,
-                                                                    self.VOL_SIZE_HEIGHT, self.VOL_SIZE_DEEP)
-            yield inputs, targets
-            # return inputs, targets
-            j = j + 1
-"""
-
-    
-
-
 def func_images_aug(vol, augmentation = False):
     inputs = []
     if augmentation:
@@ -233,8 +182,7 @@ def func_images_aug(vol, augmentation = False):
             volume = vol[:,:,:,i]
             volume = rotate(volume) 
             volume = flip(volume)
-            inputs.append(volume)
-        
+            inputs.append(volume)      
     else:
         for i in range(int(np.ceil(900/1.51069))):
             inputs.append(vol[:,:,:,i])
@@ -375,6 +323,25 @@ def test_data_generator(self):
             yield inputs2
             i = i + 1
 
+def test_data_labels_NaiveCPH(self):
+    for i in range(int(np.ceil((len(self.test_file)/self.batch_test)*self.epochs))):
+        file_chunk = self.test_file[i * self.batch_test:(i + 1) * self.batch_test]
+        targets = []
+        for file in file_chunk:
+            for j in range(int(np.ceil(900/1.51069))):
+                targets[j] = int(self.df[1][self.df[0]==file[94:101]]) 
+                    
+        yield targets
+        
+
+    
+    
+            
+            
+            
+    
+
+
 
 def normalize(volume):
     numerator = tf.subtract(x=volume, y=tf.reduce_min(volume))
@@ -402,7 +369,7 @@ def build_CNN_model(self):
     model.add(Flatten())
     model.add(Dense(self.CNN_first_layer, activation='relu'))
     model.add(Dense(self.CNN_first_layer, activation='relu'))
-    model.add(Dense(2, activation = 'softmax'))
+    model.add(Dense(2, activation = 'sigmoid'))
 
     model.compile(loss=self.CNN_loss, optimizer=self.CNN_optimizer, metrics=self.CNN_metrics)
     #model.compile(loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True), optimizer=self.CNN_optimizer, metrics=self.CNN_metrics)
